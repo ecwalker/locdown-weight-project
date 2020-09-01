@@ -1,0 +1,257 @@
+---
+title: "Lockdown Weight Project"
+date: "Last edited `r format(Sys.Date(), '%d %B %Y')`"
+output: 
+  html_document:
+    toc: TRUE
+    toc_float: TRUE
+---
+<style>
+body{
+  font-family: "Calibri";
+  color: "#2e3136";
+}
+</style>
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(fig.align = "center")
+```
+
+```{r library imports, include=FALSE}
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(readr)
+library(scales)
+library(rstatix)
+
+```
+
+<br>Guess I don't need to say that lockdown has been a strange time. But I think it's fair to say that it has also been a polarising time. More stress, less stress. More sleep, less sleep. More food, less food. Come on now, which is it?
+
+The idea that many people have put on weight during lockdown has been floated around. When I look at my own weight however, I have no idea, it's always been all over the place. Thank you mother nature on that one. I'm sure many other women will be nodding their heads right now. Yes, we are talking menstruation.
+
+I started recording my weight almost daily from May. It was just for fun really, but my confused-self now wants answers. I have lost weight... I think... putting a figure on how much though. Pick a single figure digit, or draw it from my novelty over-sized moon cup? No, I decided to use data analytics to give me some real answers.  
+
+Welcome to my R Markdown document. This is the *almost* tell all of my cycle and weight since lockdown.<br>
+
+# Importing and Wrangling Data
+
+<br>Wait an minute, you do know it's rude to ask a women her weight? *Blush* 
+
+I've done a little pre-pre-processing, yes you heard that correctly, to protect my confidentiality. My weight is given in relative terms, as a percentage from the first recorded measurement.
+
+Just so you can get an idea of the pre-pre-processing steps, I've included the code that I used to create a csv file with the data.
+
+For some reason, I weight myself in stones and pounds. Call it a bad habit. I need to import the raw data, convert all weights to kg and calculate the percentage change from day 1. I realise that I could just combine the st and lbs columns, as I'm calculating relative weights, but I just feel too naughty not using the SI units.<br>
+
+```{r data-import-and-wrangling, echo=TRUE}
+#Useful variables
+st_2_kg = 6.35029
+lbs_2_kg = 0.453592
+
+#Import CSV file
+lockdown_weight_df <- read_csv("lockdown_weight.csv")
+
+#Weight to kg
+lockdown_weight_df <- lockdown_weight_df %>% 
+  mutate(weight_kg = weight_st*st_2_kg + weight_lbs*lbs_2_kg)
+
+#Convert weight in kg to percentage change
+wt_day_1 = lockdown_weight_df$weight_kg[1]
+lockdown_weight_df <- lockdown_weight_df %>%
+  mutate(weight_perc = weight_kg*100/wt_day_1)
+
+#Remove redundant columns
+wt_perc_df <- lockdown_weight_df[c("date",
+                                   "cycle_day",
+                                   "cycle_num",
+                                   "weight_perc")]
+
+#Export new CSV file
+write_csv(wt_perc_df, "lockdown_weight_perc.csv")
+  
+```
+<br>
+
+## Pre-processing
+```{r na-info, include=FALSE}
+total_na <- sum(is.na(wt_perc_df))
+wt_na <- sum(is.na(wt_perc_df$weight_perc))
+```
+
+<br>Now that I have my actual weight protected used relative values, I still need to complete the remaining pre-processing steps. The date is in the wrong format and we have a few gaps. There are `r total_na` gaps, `r wt_na*100/total_na`% of these are in the percentage weight column. As the weight is a key piece of information, I'm just going to drop all rows with missing data.<br>
+
+```{r wrangling-date-and-missing-values}
+#Import new CSV file
+wt_perc_df <- read_csv("lockdown_weight_perc.csv")
+  
+#Date to YYYY-MM-DD format
+wt_perc_df$date <- as.Date(wt_perc_df$date, "%d/%m/%y")
+
+#Check for NA
+total_na <- sum(is.na(wt_perc_df))
+wt_na <- sum(is.na(wt_perc_df$weight_perc))
+
+#Exclude NA
+wt_perc_df <- wt_perc_df %>% drop_na()
+
+#Change weight percentage to numeric
+wt_perc_df <- wt_perc_df %>% 
+  transform(weight_perc = as.numeric(weight_perc))
+
+#Now admire our tidy dataframe
+head(wt_perc_df)
+
+```
+<br><br>
+
+# Let's Take a Look at the Data
+<br>The first thing I'm going to do is a make a line plot of my weight over time.<br>
+
+## Simple line plot
+
+```{r basic-time-series}
+wt_perc_df %>% ggplot(aes(x = date, y = weight_perc)) +
+  geom_line() +
+  labs(
+    title = "My Weight between May and August 2020",
+    x = "Date",
+    y = "Weight as % of Initial"
+  ) +
+  scale_x_date(labels=date_format("%b %y"))
+```
+<br>Well, that is pretty noisy. But how do I confirm that I have lost weight AND put a figure on it? Can you see a cycle and does it correspond to menstruation?<br>
+
+## Boxplot by cycle number
+<br>First, I'm going to look at the distribution of my weight in each cycle. To do this I'll separate the data by the cycle number in a boxplot.<br>
+
+```{r boxplot-by-cycle-number}
+wt_perc_df %>% mutate(num = as.factor(cycle_num)) %>%
+  ggplot(aes(x=num, y=weight_perc)) +
+  geom_boxplot() +
+  labs(
+    title = "Distribution of Weight for Each Cycle",
+    x = "Cycle Number",
+    y = "Weight as % of Initial"
+  )
+```
+<br>Looks good so far, overall it seems to be trending downward. The thicker bar in the middle is the median. If there are any dots, these are outliers.
+
+Ah look, there are outliers in cycle 3 and 4. We can examine this more with qq-plots.<br>
+
+## Checking for Normal Distrubutions
+<br>QQ-plots are used to examine whether a dataset is normally distributed. If a dataset is perfectly normal, then all data points will lie on the line in the plot.<br>
+```{r qq-plots}
+wt_perc_df %>% 
+  ggplot(aes(sample=weight_perc)) +
+  stat_qq() +
+  stat_qq_line() +
+  facet_wrap(cycle_num ~ .) +
+  labs(
+    title = "Comparing Distribution of Weight in Each Cycle with a Normal Distribution",
+    x = "Theoretical Normal Distribution",
+    y = "Weight as % of Initial"
+  )
+```
+<br>Yep, several data points in 3 are 4 do not want to sit on the line. Good on them, normality is overrated, right?  We can say that they are skewed, instead of normally distributed. With both the outliers and the skew, I'm going to use the median to evaluate my average weight. This is because the median will be less sensitive to the large values, these cause an artificially high mean. Let's have a look at what these medians look like.<br>
+
+## Calculate and Plot Medians
+<br>
+```{r calculate-median-weights, message=FALSE}
+#Weight loss
+median_wt <- wt_perc_df %>% group_by(cycle_num) %>%
+  summarize(med_wt = median(weight_perc)) %>%
+  transform(med_wt = as.numeric(med_wt))
+
+median_wt
+
+loss = median_wt$med_wt[1] - median_wt$med_wt[5]
+```
+
+```{r line-plot-median-weight-per-cycle, message=FALSE}
+wt_perc_df %>% group_by(cycle_num) %>%
+  summarise(avg_wt = median(weight_perc)) %>%
+  ggplot() +
+  geom_line(aes(x = cycle_num, y = avg_wt)) +
+  labs(
+    title = "Median Weight per Cycle",
+    x = "Cycle Number",
+    y = "Median Weight as % of initial"
+  )
+
+```
+<br>Going by the difference in the median of the first and last cycle, I've lost `r round(loss, digits=2)`% of my bodyweight!!
+
+Still, could this just be down to chance — to random variation?<br>
+
+## Checking Weight Loss Significance
+<br>I've decided to use the Kruskal test to explore this further. This is because the data isn't normally distributed in all of the 5 cycles.<br>
+
+```{r p-value, echo=TRUE}
+kruskal_df <- wt_perc_df %>% mutate(num=as.factor(cycle_num)) 
+kruskal_test <- kruskal.test(kruskal_df$weight_perc ~ kruskal_df$num)
+```
+<br> This gives a p-value of `r signif(kruskal_test$p.value, digits=2)`, which is significant. Technically, this test measures whether any of the groups are statically different from one of the others. What is doesn't do is check the significance of the `r round(loss, digits=2)`% figure.
+
+However, as there is a downward trend in my weight, I am happy to conclude that I have lost a weight. The downward trend is not down to random fluctuations in my weight. <br><br>
+
+# Is my weight correlated with the day of the month?
+<br>That wasn't my only question though. After having a strong suspicion that my weight changes at different times of the month, do I now have the data to prove a relationship?<br>
+```{r scatterplot-cycle-day-vs-weight-perc}
+wt_perc_df %>% 
+  mutate(num = as.factor(cycle_num)) %>%
+  ggplot(aes(x = cycle_day, y = weight_perc, color = num)) +
+  geom_point() +
+  labs(
+    title = "Weight % Plotted Against Day of Cycle",
+    x = "Cycle Day",
+    y = "Weight as % of 2020-05-07",
+    color = "Cycle Number"
+  )
+```
+<br><br>That's interesting, but it's a bit all over the place. We've already established that I've lost a little weight, so that will definitely be confounding this data. I wonder if we can neaten this plot up.<br>
+
+## Normalise to account for the weight loss
+<br>
+```{r scatterplot-cycle-day-vs-relative-weight, message=FALSE}
+rel_wt_df <- wt_perc_df %>% 
+  mutate(rel_wt = weight_perc - median_wt$med_wt[cycle_num]) 
+  
+rel_wt_df %>% mutate(num = as.factor(cycle_num)) %>%
+  ggplot(aes(x = cycle_day, y = rel_wt)) +
+  geom_point(aes(color=num)) +
+  labs(
+    title= "Weight normalised with median of each cycle",
+    x = "Cycle Day",
+    y = "Relative Weight %",
+    color = "Cycle Number"
+  ) +
+  geom_smooth()
+```
+<br>That is so much better! We can definitely see a non-linear relationship here. I used geom_smooth to draw a trendline using loess, which aggregates local linear relationships in order to give us that lovely curve. The grey bands are used to how confident the model is of the trend. My weight is highest on day 1 and lowest around day 23.<br><br>
+
+# What we've discovered
+<br>Not to brag or anything, but this is a double positive outcome for me! 
+
+1. I have lost `r round(loss, digits=2)`% of my bodyweight since lockdown.
+2. I have proof that my weight is correlated with menstruation.
+
+It's important to remember that I have just looked at correlation. This doesn't prove that menstruation actually causes the observed weight changes. There could be many actual causes from bloating to changes in eating habits (or a combination the two). 
+
+I've always found the monthly weight gain to be demotivating. It's reassuring to know that this doesn't mean all my hard work in the previous cycle has been obliterated in a haze of chocolate and sweat pants.
+
+So if you're on a diet and find yourself with a similar weight pattern. You don't have to take each 0.1kg change as either a great victory or sour defeat. I know I'm guilty of this. Not anymore. Trends over time are a far better measure of progress.
+
+Sharing a little self-love here. 
+
+
+
+
+
+
+
+
+
+
+
